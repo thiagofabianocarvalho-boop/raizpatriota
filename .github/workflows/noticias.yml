@@ -1,0 +1,42 @@
+name: Atualiza as notícias
+
+on:
+  schedule:
+    # 09:00 e 21:00 UTC = 06:00 e 18:00 em Brasília.
+    # O GitHub costuma atrasar alguns minutos — é normal.
+    - cron: "0 9,21 * * *"
+  workflow_dispatch:        # permite rodar na mão pelo botão "Run workflow"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: noticias
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet pillow
+
+      - name: Coletar
+        run: python scripts/noticias.py index.html
+
+      - name: Publicar se algo mudou
+        run: |
+          if [ -z "$(git status --porcelain index.html)" ]; then
+            echo "Nenhuma notícia nova. Nada a publicar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Notícias — $(TZ=America/Sao_Paulo date '+%d/%m/%Y %H:%M')"
+          git push
