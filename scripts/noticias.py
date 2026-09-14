@@ -30,6 +30,9 @@ QTD = 6                      # cartoes por bloco
 THUMB = (184, 138)           # 92x69 CSS em 2x
 MESES = {"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
          "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12}
+MESES_EXT = {"janeiro": 1, "fevereiro": 2, "marco": 3, "março": 3, "abril": 4,
+             "maio": 5, "junho": 6, "julho": 7, "agosto": 8, "setembro": 9,
+             "outubro": 10, "novembro": 11, "dezembro": 12}
 
 
 def get(url, binary=False, timeout=30):
@@ -91,6 +94,46 @@ def data_de(txt):
     return None
 
 
+# ------------------------------------------------------------- Prefeitura
+
+def prefeitura(limite=QTD):
+    """Le o site da Prefeitura em vez do RSS: o feed deles atrasa um a dois
+    dias. As manchetes ficam divididas entre o carrossel do topo e a lista
+    de baixo, e a data esta no proprio endereco da materia."""
+    base = "https://www.sjc.sp.gov.br"
+    doc = get(base + "/noticias/")
+    achados = {}
+    for m in re.finditer(
+            r'href="(/noticias/(\d{4})/([a-zç]+)/(\d{1,2})/[^"]+)"', doc, re.I):
+        href, ano, mes, dia = m.groups()
+        link = urllib.parse.urljoin(base, html.unescape(href))
+        janela = doc[m.end():m.end() + 1600]
+        titulo = ""
+        for rx in (r'<h3[^>]*>\s*(.*?)\s*</h3>',
+                   r'<img[^>]+alt="([^"]{8,})"',
+                   r'<span[^>]*>\s*([^<]{8,})\s*</span>'):
+            t = re.search(rx, janela, re.S)
+            if t:
+                titulo = limpa(t.group(1))
+                break
+        if not titulo:
+            t = re.search(r'title="([^"]{8,})"', doc[m.start() - 300:m.end() + 300])
+            titulo = limpa(t.group(1)) if t else ""
+        im = re.search(r'<img[^>]+src="([^"]+)"', janela)
+        reg = achados.setdefault(link, {
+            "titulo": "", "url": link, "img": "",
+            "data": datetime(int(ano), MESES_EXT.get(mes.lower(), 1), int(dia),
+                             tzinfo=TZ)})
+        if titulo and not reg["titulo"]:
+            reg["titulo"] = titulo
+        if im and not reg["img"]:
+            reg["img"] = urllib.parse.urljoin(base, html.unescape(im.group(1)))
+
+    itens = [v for v in achados.values() if v["titulo"]]
+    itens.sort(key=lambda x: x["data"], reverse=True)
+    return itens[:limite]
+
+
 # --------------------------------------------------------------- Next.js
 
 def nextjs(url, base, prefixo, limite=QTD):
@@ -144,8 +187,8 @@ def bp():
 
 
 def enriquece(itens):
-    """Feeds como o da Prefeitura nao trazem foto nem sempre trazem data.
-    Nesses casos, busca og:image e a data na propria materia."""
+    """Quando a fonte nao traz foto ou data, busca og:image e a data na
+    propria materia."""
     for it in itens:
         if it.get("img") and it.get("data"):
             continue
@@ -238,7 +281,7 @@ def main(caminho="index.html"):
     doc = original = open(caminho, encoding="utf-8").read()
     fontes = [
         ("MEON", "Meon", meon),
-        ("PREF", "Prefeitura de SJC", lambda: rss("https://www.sjc.sp.gov.br/rss/")),
+        ("PREF", "Prefeitura de SJC", prefeitura),
         ("OESTE", "Revista Oeste", lambda: rss("https://revistaoeste.com/politica/feed/")),
         ("BP", "Brasil Paralelo", bp),
     ]
